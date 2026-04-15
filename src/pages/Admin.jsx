@@ -141,10 +141,24 @@ import { LogOut, Eye, EyeOff } from "lucide-react";
 import Dashboard from "../pages/Dashboard"; 
 
 const VALID_STATUSES = ["new", "reviewed", "contacted", "closed"];
+const STATUS_OVERRIDES_KEY = "proposal_status_overrides";
 
 const normalizeStatus = (status) => {
   const normalized = (status || "new").toString().trim().toLowerCase();
   return VALID_STATUSES.includes(normalized) ? normalized : "new";
+};
+
+const getStatusOverrides = () => {
+  try {
+    const stored = localStorage.getItem(STATUS_OVERRIDES_KEY);
+    return stored ? JSON.parse(stored) : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveStatusOverrides = (overrides) => {
+  localStorage.setItem(STATUS_OVERRIDES_KEY, JSON.stringify(overrides));
 };
 
 const Admin = () => {
@@ -189,10 +203,12 @@ const Admin = () => {
       .select("*")
       .order("created_at", { ascending: false });
 
+    const overrides = getStatusOverrides();
+
     setCustomers(
       (data || []).map((item) => ({
         ...item,
-        status: normalizeStatus(item.status),
+        status: normalizeStatus(overrides[item.id] ?? item.status),
       }))
     );
   };
@@ -212,10 +228,22 @@ const Admin = () => {
     if (!confirm("Delete this proposal?")) return;
     await supabase.from("proposals").delete().eq("id", id);
     setCustomers((prev) => prev.filter((c) => c.id !== id));
+
+    const overrides = getStatusOverrides();
+    if (overrides[id] !== undefined) {
+      delete overrides[id];
+      saveStatusOverrides(overrides);
+    }
   };
 
   const updateStatus = async (id, status) => {
     const normalizedStatus = normalizeStatus(status);
+    const overrides = getStatusOverrides();
+
+    // Save immediately so refresh keeps the selected status,
+    // even if DB policies prevent the update.
+    overrides[id] = normalizedStatus;
+    saveStatusOverrides(overrides);
 
     setCustomers((prev) =>
       prev.map((c) =>
@@ -223,15 +251,29 @@ const Admin = () => {
       )
     );
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("proposals")
       .update({ status: normalizedStatus })
-      .eq("id", id);
+      .eq("id", id)
+      .select("id, status");
 
     if (error) {
       alert("Update failed: " + error.message);
       fetchCustomers();
       return;
+    }
+
+    // If no row was updated, keep local override and notify.
+    if (!data || data.length === 0) {
+      alert("Status saved locally, but database update was blocked. Check Supabase RLS update policy for proposals.");
+      return;
+    }
+
+    // DB write succeeded; remove local override for this id.
+    const latestOverrides = getStatusOverrides();
+    if (latestOverrides[id] !== undefined) {
+      delete latestOverrides[id];
+      saveStatusOverrides(latestOverrides);
     }
   };
 
