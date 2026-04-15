@@ -36,3 +36,5 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
 This Vite app lives at the repository root, so place `.env.local` next to `package.json`.
+
+If you deploy the app, also add the same variables in your host's environment settings. `.env.local` is only used for local development.
